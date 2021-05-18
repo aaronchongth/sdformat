@@ -56,24 +56,94 @@ bool loadPose(sdf::ElementPtr _sdf, ignition::math::Pose3d &_pose,
       return false;
   }
 
-  // Read the frame. An empty frame implies the parent frame.
+  // Read the frame. An empty frame implies the parent frame. This is optional.
   std::pair<std::string, bool> framePair =
       sdf->Get<std::string>("relative_to", "");
 
-  // Read the pose value.
+  // The default method of reading 6 values will be deprecated in the future.
+  // Read the pose value, if it is set, we return it.
   std::pair<ignition::math::Pose3d, bool> posePair =
     sdf->Get<ignition::math::Pose3d>("", ignition::math::Pose3d::Zero);
-
-  // Set output, but only if the return value is true.
   if (posePair.second)
   {
     _pose = posePair.first;
     _frame = framePair.first;
+    return true;
   }
 
-  // The frame attribute is optional, so only return true or false based
-  // on the pose element value.
-  return posePair.second;
+  // Start checking for translation and rotation elements.
+  ignition::math::Pose3d pose(
+      ignition::math::Vector3d::Zero, ignition::math::Quaterniond::Identity);
+
+  // Read the translation values.
+  sdf::ElementPtr translationPtr = sdf->GetElement("translation");
+  if (translationPtr)
+  {
+    std::pair<ignition::math::Vector3d, bool> translationPair =
+        translationPtr->Get<ignition::math::Vector3d>(
+            "", ignition::math::Vector3d::Zero);
+    if (!translationPair.second)
+      return false;
+
+    pose.Set(translationPair.first, pose.Rot());
+  }
+
+  // Read the rotation values.
+  sdf::ElementPtr rotationPtr = sdf->GetElement("rotation");
+  if (rotationPtr)
+  {
+    // Read the rotation type, which is mandatory.
+    std::pair<std::string, bool> rotationTypePair =
+        rotationPtr->Get<std::string>("type", "");
+    if (!rotationTypePair.second)
+      return false;
+
+    // Read the values.
+    auto rotation = ignition::math::Pose3d().Rot();
+    if (rotationTypePair.first == "rpy_degrees")
+    {
+      std::pair<ignition::math::Vector3d, bool> rpyDegPair =
+          rotationPtr->Get<ignition::math::Vector3d>(
+              "", ignition::math::Vector3d::Zero);
+      if (!rpyDegPair.second)
+        return false;
+
+      pose.Set(pose.Pos(), IGN_DTOR(rpyDegPair.first));
+    }
+    else if (rotationTypePair.first == "rpy_radians")
+    {
+      std::pair<ignition::math::Vector3d, bool> rpyRadPair =
+        rotationPtr->Get<ignition::math::Vector3d>(
+            "", ignition::math::Vector3d::Zero);
+      if (!rpyRadPair.second)
+        return false;
+
+      pose.Set(pose.Pos(), rpyRadPair.first);
+    }
+    else if (rotationTypePair.first == "q_wxyz")
+    {
+      std::pair<ignition::math::Quaterniond, bool> quaternionPair =
+          rotationPtr->Get<ignition::math::Quaterniond>(
+              "", ignition::math::Quaterniond::Identity);
+      if (!quaternionPair.second)
+        return false;
+
+      pose.Set(pose.Pos(), quaternionPair.first);
+    }
+    else
+    {
+      return false;
+    }
+  }
+
+  // If no translation or rotation elements were found, the loading fails.
+  if (!translationPtr && !rotationPtr)
+    return false;
+
+  // Set output.
+  _pose = pose;
+  _frame = framePair.first;
+  return true;
 }
 
 /////////////////////////////////////////////////
